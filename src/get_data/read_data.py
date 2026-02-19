@@ -15,9 +15,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-#client = bnb_client()
+client = bnb_client()
 ###  if you're in the US, use: 
-client = bnb_client(tld='US')#" here instead
+#client = bnb_client(tld='US')#" here instead
 
 def get_binance_px(symbol,freq,start_ts,end_ts):
     data = client.get_historical_klines(symbol,freq,start_ts,end_ts)
@@ -35,7 +35,7 @@ def get_binance_px(symbol,freq,start_ts,end_ts):
 def get_rets(freq='4h',start_ts = '2020-01-01',end_ts='2022-12-31'):
 
 
-    file_path = f"src/misc/valid_tickers_{start_ts[:4]}_to_{end_ts[:4]}.json"
+    file_path = f"src/misc/valid_tickers_full_{start_ts[:4]}_to_{end_ts[:4]}.json"
 
     if os.path.exists(file_path):
         tickers = read_json(file_path)
@@ -53,10 +53,10 @@ def get_rets(freq='4h',start_ts = '2020-01-01',end_ts='2022-12-31'):
 
     px = pd.DataFrame(px).astype(float)
     px = px.reindex(pd.date_range(px.index[0],px.index[-1],freq=freq))
-    ret = px.pct_change().dropna(how="all",axis=0)
+    ret = px.pct_change(fill_method=None)
 
     if not os.path.exists(file_path):
-        rets_cols = ret.dropna(how="all",axis=1)
-        write_json(file_path, rets_cols.columns.tolist())
+        #rets_cols = ret.dropna(how="all",axis=1)
+        write_json(file_path, ret.columns.tolist())
 
-    return ret
+    return ret, px
