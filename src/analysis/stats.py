@@ -3,36 +3,28 @@ import numpy as np
 import matplotlib.pyplot as plt
 import statsmodels.api as sm
 
-PERIODS_PER_YEAR = 2190  # 4H crypto
 
+def compute_full_stats(rets, market_rets, freq="4h"):
 
-def compute_full_stats(rets, market_rets):
-
-    # Force Series
     rets = pd.Series(rets).astype(float)
     market_rets = pd.Series(market_rets).astype(float)
 
-    # Align & drop NaNs
     df = pd.concat([rets, market_rets], axis=1).dropna()
     df.columns = ["strategy", "market"]
 
     y = df["strategy"]
     X = sm.add_constant(df["market"])
 
-    # model = sm.OLS(y, X).fit(
-    #     cov_type="HAC",
-    #     cov_kwds={"maxlags": 6}
-    # )
-
     model = sm.OLS(y, X).fit()
 
-    PERIODS_PER_YEAR = 2190  # 4H crypto
+    period_hours = pd.Timedelta(freq).total_seconds() / 3600
+    PERIODS_PER_YEAR = 365 * 24 / period_hours
 
     stats = {}
     stats["avg_ann"] = y.mean() * PERIODS_PER_YEAR
     stats["vol_ann"] = y.std() * np.sqrt(PERIODS_PER_YEAR)
     stats["sharpe"] = stats["avg_ann"] / stats["vol_ann"]
-    stats["hit_rate"] = (y > 0).mean()
+    stats["hit_rate"] = (y >= 0).mean()
 
     alpha_4h = model.params["const"]
     beta = model.params["market"]
@@ -46,92 +38,72 @@ def compute_full_stats(rets, market_rets):
     return pd.DataFrame(stats, index=[0])
 
 
+def rolling_sharpe(ret, days=90, freq="4h", plot=True):
+    if "h" in freq:
+        bars_per_day = 24 // int(freq.replace("h", ""))
+    elif "d" in freq:
+        bars_per_day = 1 // int(freq.replace("d", ""))
+    else:
+        raise ValueError(f"Invalid freq: {freq}")
+
+    window   = days * bars_per_day
+    periods  = 365 * bars_per_day
+
+    roll_mean = ret.rolling(window).mean()
+    roll_std  = ret.rolling(window).std()
+
+    roll_sharpe = (roll_mean / roll_std) * np.sqrt(periods)
+
+    if plot:
+        plt.plot(roll_sharpe)
+        plt.title(f"Rolling {days}-day Sharpe Ratio")
+        plt.xticks(rotation=45, ha='right')
+        plt.show()
+
+    return roll_sharpe
 
 
-# def compute_annualised_stats(rets, market_rets):
+def drawdown(ret):
 
-#     stats = {}
-#     stats["avg"] = rets.mean()*252
-#     stats["vol"] = rets.std()*np.sqrt(252)
-#     stats["sharpe"] = stats["avg"]/stats["vol"]
-#     stats["hit_rate"] = (rets>0).mean()
-
-
-#     # CAPM beta (same as daily)
-#     cov = np.cov(rets, market_rets)[0, 1]
-#     var_mkt = np.var(market_rets)
-#     beta = cov / var_mkt
-
-#     # Annualized alpha
-#     daily_alpha = rets.mean() - beta * market_rets.mean()
-#     stats["alpha"] = daily_alpha * 252
-#     stats["beta"] = beta
-
-#     return pd.DataFrame(stats, index=[0])
-
-
-def analyze_signal(rets,signal):
-    analysis = {}
-
-    pos_rets = []
-    neg_rets = []
-    for i in range(len(rets)):
-        if signal[i] > 1:
-            pos_rets.append(rets[i])
-        elif signal[i] < -1:
-            neg_rets.append(rets[i])
-
-    analysis["pos_ret"] = np.mean(pos_rets)
-    analysis["neg_ret"] = np.mean(neg_rets)
-    analysis["spread"] = analysis["pos_ret"] - analysis["neg_ret"]
-
-    return pd.DataFrame(analysis)
-
-
-def compute_alpha(strategy_ret, market_ret, days=365):
-
-    cov = strategy_ret.rolling(days).cov(market_ret)
-    var_mkt = market_ret.rolling(days).var()
-
-    beta = cov / var_mkt
-
-    mean_strat = strategy_ret.rolling(days).mean()
-    mean_mkt = market_ret.rolling(days).mean()
-
-    alpha = mean_strat - beta * mean_mkt
-
-    return beta, alpha
-
-
-
-def drawdown(gross_ret):
-
-    cumulative_returns = (1 + gross_ret).cumprod()
-
-    dd = (cumulative_returns / cumulative_returns.cummax() - 1)
-
-    dd.plot()
-    plt.show()
-
+    cum = (1 + ret).cumprod()
+    dd  = cum / cum.cummax() - 1
     return dd
 
 
+def drawdown_duration(ret):
 
-def drawdown_duration(gross_ret):
+    cum      = (1 + ret).cumprod()
+    is_below = cum < cum.cummax()
 
-    cumulative_returns = (1 + gross_ret).cumprod()
-    
-    peak = cumulative_returns.cummax()
-
-    duration = pd.Series(index=gross_ret.index, dtype=int)
-
-    for i in range(1, len(cumulative_returns)):
-        if cumulative_returns.iloc[i] < peak.iloc[i]:
-            duration.iloc[i] = duration.iloc[i-1] + 1
-        else:
-            duration.iloc[i] = 0
-
-    duration.plot()
-    plt.show()
+    group    = (~is_below).cumsum()
+    duration = is_below.groupby(group).cumsum().astype(int)
 
     return duration
+
+
+def plot_drawdown(gross_ret, net_ret, title = "Drawdown"):
+
+    dd_gross  = drawdown(gross_ret).astype(float).fillna(0)
+    dur_gross = drawdown_duration(gross_ret).astype(float).fillna(0)
+    dd_net    = drawdown(net_ret).astype(float).fillna(0)
+    dur_net   = drawdown_duration(net_ret).astype(float).fillna(0)
+
+    fig, axes = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+
+    axes[0].plot(dd_gross, color="red", label="Gross")
+    axes[0].plot(dd_net, color="steelblue", label="Net")
+    axes[0].fill_between(dd_gross.index, dd_gross, 0, alpha=0.3, color="red")
+    axes[0].fill_between(dd_net.index,   dd_net,   0, alpha=0.2, color="steelblue")
+    axes[0].set_title(title)
+    axes[0].set_ylabel("Drawdown")
+    axes[0].legend()
+
+    axes[1].plot(dur_gross, color="red", label="Gross")
+    axes[1].plot(dur_net, color="steelblue", label="Net")
+    axes[1].set_ylabel("Bars below peak")
+    axes[1].set_xlabel("Date")
+    axes[1].tick_params(axis="x", rotation=45)
+    axes[1].legend()
+
+    plt.tight_layout()
+    plt.show()

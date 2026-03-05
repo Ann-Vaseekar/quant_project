@@ -1,5 +1,3 @@
-
-
 from scipy.stats import norm
 import pandas as pd
 

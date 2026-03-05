@@ -55,3 +55,18 @@ def fn_freeze_universe_monthly(resid):
         frozen_mask.loc[month_idx, eligible.index] = eligible.values
     
     return resid.where(frozen_mask)
+
+def kill_flat_tails(ret, window=50, tol=1e-8):
+    rolling_var = ret.rolling(window).var()
+    dead_mask = rolling_var < tol
+    
+    ret_clean = ret.copy()
+    
+    for col in ret.columns:
+        dead_idx = dead_mask[col]
+        if dead_idx.any():
+            first_dead = dead_idx.idxmax()  # first True
+            if dead_idx.loc[first_dead]:
+                ret_clean.loc[first_dead:, col] = np.nan
+    
+    return ret_clean
