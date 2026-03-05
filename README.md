@@ -1,1 +1,1 @@
-# quant_project
+# Comparison of PCA vs OLS as techniques to isolate idiosyncratic component of returns
